@@ -34,7 +34,6 @@ export default function ArtistPage() {
 
   function handlePlayTrack(track: Track) {
     if (!artist) return;
-    // Pasa toda la lista del artista como queue
     const queue = (artist.topTracks || []).map((t) => ({
       ...t,
       artistName: artist.name,
@@ -118,10 +117,10 @@ export default function ArtistPage() {
           {(artist.topTracks || []).map((track) => (
             <div
               key={track.id}
-              onClick={() => handlePlayTrack(track)}
+              onClick={() => track.deezer_id && handlePlayTrack(track)}  // ← use deezer_id, not preview_url
               style={{
-                cursor: track.preview_url ? "pointer" : "default",
-                opacity: track.preview_url ? 1 : 0.5,
+                cursor: track.deezer_id ? "pointer" : "default",         // ← use deezer_id, not preview_url
+                opacity: track.deezer_id ? 1 : 0.5,                      // ← use deezer_id, not preview_url
                 background: currentTrack?.id === track.id ? "rgba(157,51,255,0.2)" : "rgba(255,255,255,0.05)",
                 border: currentTrack?.id === track.id ? "1px solid #9d33ff" : "1px solid rgba(255,255,255,0.08)",
                 borderRadius: 8,

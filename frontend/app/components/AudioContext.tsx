@@ -5,7 +5,7 @@ import { createContext, useContext, useRef, useState, useCallback } from "react"
 export interface Track {
   id: string;
   name: string;
-  preview_url: string | null;
+  deezer_id: string;          // ← replaces preview_url as the permanent identifier
   album_art: string;
   album_name: string;
   artistName: string;
@@ -26,6 +26,20 @@ interface AudioContextType {
 
 const AudioCtx = createContext<AudioContextType | null>(null);
 
+const API_BASE = "http://localhost:3000";
+
+/** Fetches a fresh, non-expired Deezer preview URL at playback time */
+async function fetchPreviewUrl(deezerTrackId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE}/map/preview/${deezerTrackId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.preview_url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function AudioProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -39,12 +53,17 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     if (intervalRef.current) clearInterval(intervalRef.current);
   };
 
-  const startTrack = useCallback((track: Track) => {
-    if (!track.preview_url) return;
+  const startTrack = useCallback(async (track: Track) => {
+    if (!track.deezer_id) return;
+
+    // Fetch a fresh URL every time — never use a stored one
+    const previewUrl = await fetchPreviewUrl(track.deezer_id);
+    if (!previewUrl) return;
+
     audioRef.current?.pause();
     clearTimer();
 
-    const audio = new Audio(track.preview_url);
+    const audio = new Audio(previewUrl);
     audioRef.current = audio;
     setCurrentTrack(track);
     setProgress(0);
@@ -62,7 +81,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       setPlaying(false);
       setProgress(0);
       clearTimer();
-      // Auto-siguiente
+      // Auto-next
       setCurrentTrack((prev) => {
         if (!prev) return null;
         setQueue((q) => {
