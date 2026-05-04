@@ -198,14 +198,15 @@ export class SpotifyService implements OnModuleInit {
     const { x, y } = this.computeCoordinates(genres, spotifyId, listeners);
 
     let topTracks: Array<{
-      id: string;
-      name: string;
-      preview_url: string | null;
-      album_art: string;
-      album_name: string;
-    }> = [];
+  id: string;
+  name: string;
+  preview_url: string | null;
+  youtube_id: string | null;  // ← add this
+  album_art: string;
+  album_name: string;
+}> = [];
 
-    try {
+try {
   // Step 1: Find the artist's exact Deezer ID
   const artistRes = await fetch(
     `https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=1`
@@ -225,15 +226,23 @@ export class SpotifyService implements OnModuleInit {
     id: String(t.id),
     name: t.title,
     preview_url: t.preview ?? null,
+    youtube_id: null,  // ← add this
     album_art: t.album?.cover_medium ?? t.album?.cover ?? '',
     album_name: t.album?.title ?? '',
   }));
+
+  // Step 3: For tracks with no Deezer preview, fetch a YouTube ID
+  topTracks = await Promise.all(
+    topTracks.map(async (t) => ({
+      ...t,
+      youtube_id: t.preview_url ? null : await this.fetchYoutubeId(name, t.name),
+    }))
+  );
 
   this.logger.log(`Deezer: fetched ${topTracks.length} tracks for ${name}`);
 } catch (e) {
   this.logger.error(`Deezer top tracks failed for ${name}: ${e}`);
 }
-
     // ── FIX: Use $set so Mongoose properly overwrites arrays on existing docs ──
     const updatePayload = {
       $set: {
@@ -314,6 +323,22 @@ export class SpotifyService implements OnModuleInit {
       throw error;
     }
   }
+
+  private async fetchYoutubeId(artistName: string, trackName: string): Promise<string | null> {
+  const apiKey = this.config.get<string>('YOUTUBE_API_KEY');
+  if (!apiKey) return null;
+
+  try {
+    const q = encodeURIComponent(`${artistName} ${trackName}`);
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${q}&type=video&videoCategoryId=10&maxResults=1&key=${apiKey}`
+    );
+    const data = await res.json() as { items: { id: { videoId: string } }[] };
+    return data.items?.[0]?.id?.videoId ?? null;
+  } catch {
+    return null;
+  }
+}
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

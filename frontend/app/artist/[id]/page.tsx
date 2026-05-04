@@ -7,6 +7,7 @@ interface Track {
   id: string;
   name: string;
   preview_url: string | null;
+  youtube_id: string | null;
   album_art: string;
   album_name: string;
 }
@@ -30,6 +31,7 @@ export default function ArtistPage() {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [youtubeKey, setYoutubeKey] = useState(0); // force iframe remount on play/pause
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressInterval = useRef<NodeJS.Timeout | null>(null);
 
@@ -38,46 +40,82 @@ export default function ArtistPage() {
       .then((r) => r.json())
       .then((data) => {
         setArtist(data);
-        if (data.topTracks?.length > 0) setCurrentTrack(data.topTracks[0]);
+        if (data.topTracks?.length > 0) {
+          const firstPlayable = data.topTracks.find(
+            (t: Track) =>
+              (t.preview_url && t.preview_url.trim() !== '') || t.youtube_id
+          );
+          setCurrentTrack(firstPlayable ?? data.topTracks[0]);
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [id]);
 
+  function isPlayable(track: Track) {
+    return (track.preview_url && track.preview_url.trim() !== '') || !!track.youtube_id;
+  }
+
   function playTrack(track: Track) {
-    if (!track.preview_url) return;
+    if (!isPlayable(track)) return;
+
+    // Stop any existing Deezer audio
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current = null;
       if (progressInterval.current) clearInterval(progressInterval.current);
     }
-    const audio = new Audio(track.preview_url);
-    audioRef.current = audio;
-    audio.play();
-    setPlaying(true);
+
     setCurrentTrack(track);
     setProgress(0);
-    progressInterval.current = setInterval(() => {
-      setProgress((audio.currentTime / audio.duration) * 100 || 0);
-    }, 500);
-    audio.onended = () => {
-      setPlaying(false);
-      setProgress(0);
-      if (progressInterval.current) clearInterval(progressInterval.current);
-    };
+
+    if (track.preview_url && track.preview_url.trim() !== '') {
+      // Play via Deezer preview
+      const audio = new Audio(track.preview_url);
+      audioRef.current = audio;
+      audio.play().catch((e) => {
+        console.warn('Audio play failed:', e);
+        setPlaying(false);
+      });
+      setPlaying(true);
+      progressInterval.current = setInterval(() => {
+        setProgress((audio.currentTime / audio.duration) * 100 || 0);
+      }, 500);
+      audio.onended = () => {
+        setPlaying(false);
+        setProgress(0);
+        if (progressInterval.current) clearInterval(progressInterval.current);
+      };
+    } else if (track.youtube_id) {
+      // Play via YouTube iframe — remount with autoplay
+      setPlaying(true);
+      setYoutubeKey((k) => k + 1);
+    }
   }
 
   function togglePlay() {
-    if (!audioRef.current) return;
-    if (playing) {
-      audioRef.current.pause();
-      setPlaying(false);
-      if (progressInterval.current) clearInterval(progressInterval.current);
-    } else {
-      audioRef.current.play();
-      setPlaying(true);
-      progressInterval.current = setInterval(() => {
-        setProgress((audioRef.current!.currentTime / audioRef.current!.duration) * 100 || 0);
-      }, 500);
+    if (!currentTrack) return;
+
+    if (currentTrack.preview_url && currentTrack.preview_url.trim() !== '') {
+      // Deezer toggle
+      if (!audioRef.current) return;
+      if (playing) {
+        audioRef.current.pause();
+        setPlaying(false);
+        if (progressInterval.current) clearInterval(progressInterval.current);
+      } else {
+        audioRef.current.play();
+        setPlaying(true);
+        progressInterval.current = setInterval(() => {
+          setProgress((audioRef.current!.currentTime / audioRef.current!.duration) * 100 || 0);
+        }, 500);
+      }
+    } else if (currentTrack.youtube_id) {
+      // YouTube toggle — remount iframe with/without autoplay
+      setPlaying((p) => {
+        setYoutubeKey((k) => k + 1);
+        return !p;
+      });
     }
   }
 
@@ -175,8 +213,8 @@ export default function ArtistPage() {
               key={track.id}
               onClick={() => playTrack(track)}
               style={{
-                cursor: track.preview_url ? "pointer" : "default",
-                opacity: track.preview_url ? 1 : 0.5,
+                cursor: isPlayable(track) ? "pointer" : "default",
+                opacity: isPlayable(track) ? 1 : 0.5,
                 background: currentTrack?.id === track.id ? "rgba(157,51,255,0.2)" : "rgba(255,255,255,0.05)",
                 border: currentTrack?.id === track.id ? "1px solid #9d33ff" : "1px solid rgba(255,255,255,0.08)",
                 borderRadius: 8,
@@ -221,25 +259,55 @@ export default function ArtistPage() {
             <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{artist.name}</p>
           </div>
 
-          {/* Controls */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flex: 2 }}>
+          {/* Controls — pinned to center */}
+          <div style={{
+            position: "absolute",
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+            width: 400,
+          }}>
             <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
               <button onClick={() => skipTrack("prev")} style={{ background: "none", border: "none", color: "white", fontSize: 20, cursor: "pointer" }}>⏮</button>
               <button
                 onClick={togglePlay}
-                disabled={!currentTrack.preview_url}
+                disabled={!isPlayable(currentTrack)}
                 style={{ background: "#9d33ff", border: "none", borderRadius: "50%", width: 40, height: 40, color: "white", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
               >
                 {playing ? "⏸" : "▶"}
               </button>
               <button onClick={() => skipTrack("next")} style={{ background: "none", border: "none", color: "white", fontSize: 20, cursor: "pointer" }}>⏭</button>
             </div>
-            <div style={{ width: "100%", maxWidth: 400, height: 4, background: "rgba(255,255,255,0.15)", borderRadius: 2 }}>
-              <div style={{ width: `${progress}%`, height: "100%", background: "#9d33ff", borderRadius: 2, transition: "width 0.5s linear" }} />
-            </div>
+
+            {/* Deezer progress bar */}
+            {currentTrack.preview_url && (
+              <div style={{ width: "100%", maxWidth: 400, height: 4, background: "rgba(255,255,255,0.15)", borderRadius: 2 }}>
+                <div style={{ width: `${progress}%`, height: "100%", background: "#9d33ff", borderRadius: 2, transition: "width 0.5s linear" }} />
+              </div>
+            )}
+
+            {/* YouTube label */}
+            {currentTrack.youtube_id && !currentTrack.preview_url && (
+              <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
+                vía YouTube
+              </p>
+            )}
           </div>
 
-          {!currentTrack.preview_url && (
+          {/* Hidden YouTube iframe */}
+          {currentTrack.youtube_id && !currentTrack.preview_url && playing && (
+            <iframe
+              key={`${currentTrack.youtube_id}-${youtubeKey}`}
+              src={`https://www.youtube.com/embed/${currentTrack.youtube_id}?autoplay=1&controls=0`}
+              allow="autoplay"
+              style={{ width: 0, height: 0, border: "none", position: "absolute" }}
+            />
+          )}
+
+          {!isPlayable(currentTrack) && (
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: 0 }}>Sin preview</p>
           )}
         </div>

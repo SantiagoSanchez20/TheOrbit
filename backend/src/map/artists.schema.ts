@@ -11,6 +11,7 @@ class Track {
   @Prop({ type: String, default: null }) preview_url!: string | null;
   @Prop({ default: '' })    album_art!: string;
   @Prop({ default: '' })    album_name!: string;
+  @Prop({ type: String, default: null }) youtube_id!: string | null; // ← add this
 }
 const TrackSchema = SchemaFactory.createForClass(Track);
 
